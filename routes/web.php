@@ -1,29 +1,34 @@
 <?php
-
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ContentGeneratorController;
-use App\Http\Controllers\ChatbotController;
 
-// Chatbot routes
-Route::prefix('chatbot')->name('chatbot.')->group(function() {
-    Route::get('/', [ChatbotController::class, 'index'])->name('index');
-    Route::post('/send', [ChatbotController::class, 'sendMessage'])->name('send');
-    Route::get('/history', [ChatbotController::class, 'getHistory'])->name('history');
-    Route::post('/clear', [ChatbotController::class, 'clearHistory'])->name('clear');
-    Route::get('/export', [ChatbotController::class, 'exportConversation'])->name('export');
-    Route::get('/templates', [ChatbotController::class, 'getTemplates'])->name('templates');
-    Route::get('/status', [ChatbotController::class, 'status'])->name('status');
-});
-
-// Root redirect to chatbot
+// Main application routes
 Route::get('/', function () {
-    return redirect()->route('chatbot.index');
+    return redirect('/content/generator');
 });
 
-// Keep existing content generator routes for comparison
 Route::prefix('content')->name('content.')->group(function() {
+    // Main interface
     Route::get('/generator', [ContentGeneratorController::class, 'index'])->name('generator');
+    
+    // Content generation
     Route::post('/generate', [ContentGeneratorController::class, 'generate'])->name('generate');
+    
+    // Service status and health
     Route::get('/check-service', [ContentGeneratorController::class, 'checkService'])->name('check-service');
-    Route::get('/test', [ContentGeneratorController::class, 'test'])->name('test');
+    Route::get('/status', [ContentGeneratorController::class, 'checkService'])->name('status');
+    
+    // Academic templates
+    Route::get('/templates', [ContentGeneratorController::class, 'getTemplates'])->name('templates');
+    
+    // Chat functionality
+    Route::post('/send', [ContentGeneratorController::class, 'sendMessage'])->name('send');
+    Route::post('/clear', [ContentGeneratorController::class, 'clearHistory'])->name('clear');
+    Route::get('/export', [ContentGeneratorController::class, 'exportConversation'])->name('export');
+});
+
+// Test routes
+Route::get('/test-gemini', function() {
+    $service = new App\Services\GeminiService();
+    return $service->getServiceHealth();
 });

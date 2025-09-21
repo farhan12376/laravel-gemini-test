@@ -1,57 +1,55 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
-use App\Services\LlamaService;
+use App\Services\GeminiService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
 
 class ContentGeneratorController extends Controller
 {
-    private $llamaService;
+    private $geminiService;
 
-    public function __construct(LlamaService $llamaService)
+    public function __construct(GeminiService $geminiService)
     {
-        $this->llamaService = $llamaService;
+        $this->geminiService = $geminiService;
     }
 
-    /**
-     * Display the content generator page
-     */
     public function index(): View
     {
         try {
-            $serviceRunning = $this->llamaService->isServiceRunning();
-            $availableModels = $this->llamaService->getAvailableModels();
+            $serviceRunning = $this->geminiService->isServiceRunning();
+            $availableModels = $this->geminiService->getAvailableModels();
             
-            return view('generator.index', compact('serviceRunning', 'availableModels'));
+            $available_modes = [
+                'general' => ['name' => 'General Assistant', 'description' => 'General academic help'],
+                'brainstorm' => ['name' => 'Research Brainstorm', 'description' => 'Generate research ideas'],
+                'analysis' => ['name' => 'Data Analysis', 'description' => 'Statistical analysis help'],
+                'writing' => ['name' => 'Academic Writing', 'description' => 'Writing assistance'],
+                'literature' => ['name' => 'Literature Review', 'description' => 'Research synthesis']
+            ];
+            
+            return view('generator.index', compact('serviceRunning', 'availableModels', 'available_modes'));
         } catch (\Exception $e) {
             Log::error('Error loading generator index: ' . $e->getMessage());
             
             return view('generator.index', [
                 'serviceRunning' => false,
                 'availableModels' => [],
+                'available_modes' => [],
                 'error' => 'Failed to load service status: ' . $e->getMessage()
             ]);
         }
     }
 
-    /**
-     * Generate new content using Llama
-     */
     public function generate(Request $request): JsonResponse
     {
-        // CRITICAL: Set PHP execution timeout to prevent script timeout
-        set_time_limit(300); // 5 minutes
-        ini_set('max_execution_time', 300);
+        set_time_limit(120);
         
         try {
-            Log::info('Content generation request received', $request->all());
-
-            // Validate request
             $validator = Validator::make($request->all(), [
                 'content_type' => 'required|in:article,blog,social,email',
                 'topic' => 'required|string|max:500',
@@ -60,199 +58,222 @@ class ContentGeneratorController extends Controller
             ]);
 
             if ($validator->fails()) {
-                Log::warning('Validation failed', $validator->errors()->toArray());
-                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Data yang dimasukkan tidak valid',
+                    'message' => 'Data tidak valid',
                     'errors' => $validator->errors()
                 ], 422);
             }
 
-            // Check if Llama service is running
-            if (!$this->llamaService->isServiceRunning()) {
-                Log::error('Ollama service not running');
-                
+            if (!$this->geminiService->isServiceRunning()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Layanan Ollama tidak berjalan. Pastikan Ollama sudah dijalankan dan dapat diakses di: ' . config('llama.base_url'),
-                    'debug' => [
-                        'url' => config('llama.base_url'),
-                        'expected_endpoint' => config('llama.base_url') . '/api/tags'
-                    ]
+                    'message' => 'Layanan Gemini tidak tersedia'
                 ], 503);
             }
 
-            Log::info('Starting content generation', [
-                'content_type' => $request->input('content_type'),
-                'topic' => $request->input('topic')
-            ]);
-
-            // Generate content using Llama
-            $result = $this->llamaService->generateContent($request->all());
+            $result = $this->geminiService->generateContent($request->all());
 
             if ($result['success']) {
-                Log::info('Content generation successful');
-                
                 return response()->json([
                     'success' => true,
                     'data' => $result['content']
                 ]);
             }
 
-            Log::error('Content generation failed', ['error' => $result['error'] ?? 'Unknown error']);
-
             return response()->json([
                 'success' => false,
-                'message' => $result['error'] ?? 'Gagal membuat konten',
-                'debug' => [
-                    'service_url' => config('llama.base_url'),
-                    'model' => config('llama.model')
-                ]
+                'message' => $result['error'] ?? 'Gagal generate konten'
             ], 500);
 
         } catch (\Exception $e) {
-            Log::error('Exception in generate method', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            Log::error('Generation error: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage(),
-                'debug' => [
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine()
-                ]
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    // Keep all your other methods as they were...
-    public function checkService(): JsonResponse
+    public function sendMessage(Request $request): JsonResponse
     {
+        set_time_limit(120);
+        
         try {
-            $health = $this->llamaService->getServiceHealth();
-
-            return response()->json([
-                'service_running' => $health['status'] === 'running',
-                'available_models' => $health['available_models'] ?? [],
-                'config' => [
-                    'base_url' => config('llama.base_url'),
-                    'model' => config('llama.model'),
-                    'timeout' => config('llama.timeout'),
-                    'temperature' => config('llama.temperature')
-                ],
-                'health' => $health
+            $request->validate([
+                'message' => 'required|string|max:2000',
+                'mode' => 'required|in:general,brainstorm,analysis,writing,literature'
             ]);
-        } catch (\Exception $e) {
-            Log::error('Service check failed', ['error' => $e->getMessage()]);
-            
-            return response()->json([
-                'service_running' => false,
-                'available_models' => [],
-                'error' => $e->getMessage(),
-                'config' => [
-                    'base_url' => config('llama.base_url', 'not configured'),
-                    'model' => config('llama.model', 'not configured')
-                ]
-            ], 500);
-        }
-    }
 
-    public function test(): JsonResponse
-    {
-        try {
-            $checks = [];
+            $result = $this->geminiService->generateChatResponse(
+                $request->input('message'),
+                $request->input('mode')
+            );
 
-            $checks['controller'] = [
-                'status' => 'OK',
-                'message' => 'Controller berfungsi dengan baik',
-                'timestamp' => date('Y-m-d H:i:s')
-            ];
-
-            $checks['config'] = [
-                'base_url' => config('llama.base_url'),
-                'model' => config('llama.model'),
-                'timeout' => config('llama.timeout'),
-                'config_loaded' => config('llama') ? true : false
-            ];
-
-            try {
-                $checks['service'] = [
-                    'running' => $this->llamaService->isServiceRunning(),
-                    'models' => $this->llamaService->getAvailableModels()
+            if ($result['success']) {
+                // Store in session for history
+                $history = Session::get('chat_history', []);
+                $history[] = [
+                    'user_message' => $request->input('message'),
+                    'response' => $result['content'],
+                    'mode' => $result['mode'],
+                    'timestamp' => $result['created_at']
                 ];
-            } catch (\Exception $e) {
-                $checks['service'] = [
-                    'running' => false,
-                    'error' => $e->getMessage()
-                ];
+                Session::put('chat_history', array_slice($history, -20)); // Keep last 20
+
+                return response()->json([
+                    'success' => true,
+                    'response' => $result['content'],
+                    'mode' => $result['mode'],
+                    'model' => $result['model_used'],
+                    'timestamp' => $result['created_at'],
+                    'suggestions' => $this->getSuggestions($result['mode'])
+                ]);
             }
 
             return response()->json([
-                'success' => true,
-                'checks' => $checks
-            ]);
+                'success' => false,
+                'message' => $result['error'] ?? 'Failed to generate response'
+            ], 500);
 
         } catch (\Exception $e) {
+            Log::error('Chat error: ' . $e->getMessage());
+            
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    public function history(): View
-    {
-        $contents = [];
-        return view('generator.history', compact('contents'));
-    }
-
-    public function show($id): View
-    {
-        $content = null;
-        return view('generator.show', compact('content'));
-    }
-
-    public function getStats(): JsonResponse
+    public function checkService(): JsonResponse
     {
         try {
-            $stats = [
-                'total_generated' => 0,
-                'today_generated' => 0,
-                'popular_types' => [],
-                'service_status' => $this->llamaService->isServiceRunning()
-            ];
-            
-            return response()->json($stats);
+            $health = $this->geminiService->getServiceHealth();
+
+            return response()->json([
+                'success' => true,
+                'service_running' => $health['status'] === 'running',
+                'service_status' => $health['status'],
+                'available_models' => $health['available_models'] ?? [],
+                'config' => [
+                    'base_url' => config('gemini.base_url'),
+                    'model' => config('gemini.model'),
+                    'api_configured' => $health['api_configured'] ?? false
+                ],
+                'last_checked' => $health['last_checked']
+            ]);
         } catch (\Exception $e) {
             return response()->json([
+                'success' => false,
+                'service_running' => false,
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
-    public function regenerate(Request $request): JsonResponse
+    public function getTemplates(): JsonResponse
     {
-        return $this->generate($request);
+        $templates = [
+            'research_proposal' => [
+                'title' => 'Research Proposal Help',
+                'content' => 'Help me structure a research proposal with background, objectives, methodology, and expected outcomes.'
+            ],
+            'literature_review' => [
+                'title' => 'Literature Review Guide',
+                'content' => 'Guide me through conducting a comprehensive literature review for my research topic.'
+            ],
+            'methodology' => [
+                'title' => 'Research Methodology',
+                'content' => 'Help me choose and design appropriate research methodology for my study.'
+            ],
+            'data_analysis' => [
+                'title' => 'Data Analysis Support',
+                'content' => 'Assist me with statistical analysis and interpretation of my research data.'
+            ]
+        ];
+
+        return response()->json([
+            'success' => true,
+            'templates' => $templates
+        ]);
     }
 
-    public function download(Request $request)
+    public function clearHistory(): JsonResponse
+    {
+        Session::forget('chat_history');
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Chat history cleared'
+        ]);
+    }
+
+    public function exportConversation(Request $request)
     {
         try {
-            $filename = 'content_' . date('Y-m-d_H-i-s') . '.txt';
-            $content = $request->input('content', 'No content provided');
+            $history = Session::get('chat_history', []);
             
+            if (empty($history)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No conversation to export'
+                ], 400);
+            }
+
+            $content = "Academic Research Assistant - Chat Export\n";
+            $content .= "Exported: " . now()->format('Y-m-d H:i:s') . "\n";
+            $content .= str_repeat('=', 50) . "\n\n";
+
+            foreach ($history as $chat) {
+                $content .= "USER: " . $chat['user_message'] . "\n\n";
+                $content .= "ASSISTANT (" . strtoupper($chat['mode']) . "): " . $chat['response'] . "\n\n";
+                $content .= str_repeat('-', 30) . "\n\n";
+            }
+
             return response($content)
                 ->header('Content-Type', 'text/plain')
-                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+                ->header('Content-Disposition', 'attachment; filename="academic_chat_' . date('Y-m-d_H-i-s') . '.txt"');
+
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to download: ' . $e->getMessage()
+                'message' => 'Export failed: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    private function getSuggestions($mode)
+    {
+        $suggestions = [
+            'general' => [
+                'How do I start my research?',
+                'What research methods should I use?',
+                'Help me find relevant literature'
+            ],
+            'brainstorm' => [
+                'What are current trends in this field?',
+                'Help me narrow down my research focus',
+                'Suggest related research questions'
+            ],
+            'analysis' => [
+                'Which statistical test should I use?',
+                'How do I interpret these results?',
+                'Is my sample size adequate?'
+            ],
+            'writing' => [
+                'How do I structure my introduction?',
+                'Help me improve my abstract',
+                'What citation style should I use?'
+            ],
+            'literature' => [
+                'How do I synthesize findings?',
+                'What databases should I search?',
+                'Help identify research gaps'
+            ]
+        ];
+
+        return $suggestions[$mode] ?? $suggestions['general'];
     }
 }

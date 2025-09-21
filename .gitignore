@@ -3,35 +3,43 @@
 npm-debug.log
 yarn-error.log
 
-# Laravel 4 specific
-bootstrap/compiled.php
-app/storage/
+# Laravel specific
+/public/storage
+/public/hot
+/public/build
 
-# Laravel 5 & Lumen specific
-public/storage
-public/hot
-
-# Laravel 5 & Lumen specific with changed public path
-public_html/storage
-public_html/hot
-
+# Laravel storage (biarkan folder ada, tapi isi runtime di-ignore)
 /storage/*.key
 /storage/pail
+/storage/logs/*.log
+/storage/framework/cache/*.php
+/storage/framework/sessions/*
+/storage/framework/views/*
 
-.env
-.env.backup
-.env.production
+# Environment files (jangan ignore .env.example)
+.env*
+!.env.example
 
+# Laravel cache
+/bootstrap/cache/*.php
+
+# Homestead & Vagrant
 Homestead.yaml
 Homestead.json
-
 /.vagrant
+
+# IDE & Editor
 /.fleet
 /.idea
 /.vscode
 
+# PHPUnit
 .phpunit.result.cache
 /.phpunit.cache
+
+# Composer & PHP tools
 .phpactor.json
 auth.json
-/public/build
+
+# Docker (optional, biar dev lokal aja)
+/docker-compose.override.yml
